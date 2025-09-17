@@ -7,11 +7,11 @@ All generated functions are immutable after their creation, ensuring they cannot
 
 The auditing is comprehensive, recording the following data for each operation in a centralized table:
 
-    Unique event identifier
-    Type of operation (INSERT, UPDATE, DELETE)
-    Name of the affected table
-    Exact date and time of the event
-    User executing the operation
-    Client IP address
-    Previous state of the data (before the modification)
-    New state of the data (after the modification)
+    *Unique event identifier
+    *Type of operation (INSERT, UPDATE, DELETE)
+    *Name of the affected table
+    *Exact date and time of the event
+    *User executing the operation
+    *Client IP address
+    *Previous state of the data (before the modification)
+    *New state of the data (after the modification)
