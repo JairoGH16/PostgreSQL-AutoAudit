@@ -1,9 +1,38 @@
--- autoaudit--1.0.sql
--- Initial version of AutoAudit extension
--- This extension adds automatic auditing functionality to PostgreSQL databases.
+-- ==============================================================
+-- EXTENSION: AutoAudit
+-- VERSION: 1.0
+-- Authors: Jairo Jesus Gonzalez, Rafael Odio Mendoza, Maria Paula Castillo Chinchilla, Aaron Lios Cubillo
+-- Course: "Bases de Datos II"
+--
+-- Description:
+--   This extension adds automatic auditing capabilities
+--   to PostgreSQL databases. It records all INSERT, UPDATE,
+--   and DELETE operations executed by any user on any table
+--   in the database (except system schemas and the audit schema).
+--
+--   Security and Integrity notes:
+--   - Creates and uses a dedicated schema: "autoaudit".
+--   - The trigger function is defined with SECURITY DEFINER,
+--     so auditing works without requiring explicit GRANTs
+--     on the audit_log table for every user.
+--   - Each event stores: operation type, table name,
+--     user who executed it, client IP, and row data (before/after).
+-- ==============================================================
 
 -- ==========================================
 -- Create the centralized audit log table
+-- ==========================================
+-- Purpose:
+--   Stores all audit events in a single table.
+-- Columns:
+--   event_id       : auto-incremented unique identifier
+--   operation_type : type of operation (INSERT, UPDATE, DELETE)
+--   table_name     : affected table
+--   event_time     : exact timestamp of the operation
+--   executed_by    : role/user who executed the statement
+--   client_ip      : IP of the client session
+--   old_data       : row state before the operation (JSONB)
+--   new_data       : row state after  the operation (JSONB)
 -- ==========================================
 CREATE TABLE autoaudit.audit_log (
     event_id       BIGSERIAL PRIMARY KEY,
@@ -17,11 +46,31 @@ CREATE TABLE autoaudit.audit_log (
 );
 
 -- ==========================================
--- Generic audit trigger function
+-- Generic Audit Trigger Function
+-- ------------------------------------------
+-- Name : audit_trigger()
+-- Type : AFTER ROW trigger (INSERT, UPDATE, DELETE)
+-- Security:
+--   SECURITY DEFINER ensures that the function
+--   inserts into audit_log with the privileges of
+--   the function owner (typically postgres).
+--   This avoids granting INSERT privileges on audit_log
+--   to every regular user of the database.
+-- Behavior:
+--   - Detects the operation type (INSERT, UPDATE, DELETE)
+--   - Captures OLD and NEW row states as JSONB
+--   - Inserts a row into audit_log with:
+--       * operation type
+--       * affected table
+--       * session user
+--       * client IP
+--       * old/new row data
+--   - Returns NEW for INSERT/UPDATE or OLD for DELETE
 -- ==========================================
 CREATE OR REPLACE FUNCTION autoaudit.audit_trigger()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_old JSONB;
@@ -49,12 +98,12 @@ BEGIN
         new_data
     )
     VALUES (
-        TG_OP,              -- INSERT, UPDATE, DELETE
-        TG_TABLE_NAME,      -- table affected
-        current_user,       -- user executing
-        inet_client_addr(), -- client IP
-        v_old,
-        v_new
+        TG_OP,              -- Operation: INSERT, UPDATE, DELETE
+        TG_TABLE_NAME,      -- Affected table
+        SESSION_USER,       -- User/role executing the statement
+        inet_client_addr(), -- client connection IP
+        v_old,              -- Row state before the operation
+        v_new               -- Row state after the operation
     );
 
     -- For INSERT/UPDATE return NEW, for DELETE return OLD
@@ -68,6 +117,16 @@ $$;
 
 -- ==========================================
 -- Function to attach audit trigger to all existing tables
+-- ==========================================
+-- Purpose:
+--   Automatically applies the audit_trigger()
+--   function to all existing base tables in
+--   the database (excluding system schemas
+--   and the autoaudit schema).
+-- Behavior:
+--   - Iterates over user tables
+--   - Drops old audit trigger if it exists
+--   - Creates a new audit trigger with name pattern: audit_<table>
 -- ==========================================
 CREATE OR REPLACE FUNCTION autoaudit.attach_triggers_to_all_tables()
 RETURNS void
@@ -89,7 +148,7 @@ BEGIN
         EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I.%I;',
                         v_trigger_name, r.table_schema, r.table_name);
 
-        -- Create trigger
+        -- Create trigger linked to audit_trigger()
         EXECUTE format('CREATE TRIGGER %I
                         AFTER INSERT OR UPDATE OR DELETE
                         ON %I.%I
@@ -99,14 +158,21 @@ BEGIN
     END LOOP;
 END;
 $$;
-
--- Run it immediately after extension install
+-- Execute immediately after extension is installed
 SELECT autoaudit.attach_triggers_to_all_tables();
 
 -- ==========================================
 -- Event trigger to attach audit to new tables
 -- ==========================================
--- Function linked to event trigger
+-- Purpose:
+--   Ensures that any new table created after
+--   installing the extension automatically
+--   receives an audit trigger.
+-- Behavior:
+--   - Captures CREATE TABLE DDL events
+--   - Dynamically attaches an audit trigger
+--     invoking audit_trigger() to the new table
+-- ==========================================
 CREATE OR REPLACE FUNCTION autoaudit.create_audit_trigger_for_new_table()
 RETURNS event_trigger
 LANGUAGE plpgsql
@@ -130,8 +196,7 @@ BEGIN
     END LOOP;
 END;
 $$;
-
--- Create the event trigger
+-- Create the event trigger itself
 DROP EVENT TRIGGER IF EXISTS autoaudit_attach_new_tables;
 CREATE EVENT TRIGGER autoaudit_attach_new_tables
     ON ddl_command_end
