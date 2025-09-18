@@ -1,5 +1,4 @@
-
-DROP EXTENSION IF EXISTS autoaudit CASCADE;
+--DROP EXTENSION IF EXISTS autoaudit CASCADE;
 CREATE EXTENSION autoaudit;
 
 SELECT table_schema, table_name
