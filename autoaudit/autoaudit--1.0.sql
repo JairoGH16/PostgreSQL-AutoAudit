@@ -75,7 +75,19 @@ AS $$
 DECLARE
     v_old JSONB;
     v_new JSONB;
+    v_executor TEXT;
 BEGIN
+     -- Try to capture the active role (current role)
+    BEGIN
+        v_executor := current_setting('role', true);
+    EXCEPTION
+        WHEN others THEN
+            v_executor := NULL;
+    END;
+    -- If no active role was found, fall back to session_user
+    IF v_executor IS NULL OR v_executor = '' OR v_executor = 'none' THEN
+        v_executor := session_user;
+    END IF;
     -- Convert OLD and NEW into JSONB if they exist
     IF (TG_OP = 'DELETE') THEN
         v_old := to_jsonb(OLD);
@@ -100,7 +112,7 @@ BEGIN
     VALUES (
         TG_OP,              -- Operation: INSERT, UPDATE, DELETE
         TG_TABLE_NAME,      -- Affected table
-        SESSION_USER,       -- User/role executing the statement
+        v_executor,       -- User/role executing the statement
         inet_client_addr(), -- client connection IP
         v_old,              -- Row state before the operation
         v_new               -- Row state after the operation
