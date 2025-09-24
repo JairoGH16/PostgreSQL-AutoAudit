@@ -1,0 +1,8 @@
+# autoaudit.control
+# PostgreSQL Extension: AutoAudit
+
+comment = 'Automatic auditing extension for PostgreSQL'
+default_version = '1.0'
+relocatable = false
+schema = autoaudit
+requires = ''
